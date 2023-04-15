@@ -1,8 +1,10 @@
 import network
-from web import Web
+from web import Web, Req
 from switch import Door, Light
 from machine import Pin, I2C
 import ssd1306
+import datasets as ds
+import time
 
 
 i2c = I2C(sda=Pin(4), scl=Pin(5))
@@ -32,7 +34,8 @@ CLight = Light()
 
 web = Web()
 
-def Light_func(req):
+
+def Light_func(req:Req):
     if req.url == '/Light_on':
         CLight.on()
     if req.url == '/Light_off':
@@ -42,7 +45,7 @@ def Light_func(req):
         return
     req.response('OK')
     
-def Door_func(req):
+def Door_func(req:Req):
     if req.url == '/Door_open':
         CDoor.up()
     if req.url == '/Door_stop':
@@ -53,6 +56,23 @@ def Door_func(req):
         req.response(CDoor.status)
         return
     req.response('OK')
+
+def Auto_func(req:Req):
+    if req.url == '/Auto_open':
+        req.response('start')
+        CDoor.up()
+        CLight.on()
+        time.sleep(25)
+        CDoor.stop()
+        return
+    if req.url == '/Auto_close':
+        req.response('start')
+        CDoor.down()
+        time.sleep(25)
+        CDoor.stop()
+        CLight.off()
+
+
 
 def Dete_func(req):
     req.response('NONE')
@@ -66,29 +86,8 @@ web.apply({
     '/Door_close':Door_func,
     '/Door_status':Door_func,
     '/Dete_status':Dete_func,
+    '/Auto_open':Auto_func,
+    '/Auto_close':Auto_func,
 })
 
 web.active()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

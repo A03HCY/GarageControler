@@ -1,93 +1,79 @@
-import network
-from web import Web, Req
-from switch import Door, Light
-from machine import Pin, I2C
-import ssd1306
-import datasets as ds
-import time
+import lib.datasets as ds
+import lib.controls as ctl
+import lib.wifi     as wifi
+import machine , time
+from lib.web    import Web , Req
 
 
-i2c = I2C(sda=Pin(4), scl=Pin(5))
-display = ssd1306.SSD1306_I2C(128, 64, i2c)
-display.text('starting...', 0, 0, 1)
-display.show()
+door  = ctl.Door()
+light = ctl.Light()
 
+wifi.connect()
 
-def do_connect(essid, password):
-    import network 
-    wifi = network.WLAN(network.STA_IF)  
-    if not wifi.isconnected(): 
-        print('connecting to network...')
-        wifi.active(True) 
-        wifi.connect(essid, password) 
-        while not wifi.isconnected():
-            pass 
-    print('network config:', wifi.ifconfig())
-    display.fill(0)
-    display.text(wifi.ifconfig()[0], 0, 0, 1)
-    display.show()
-    
-do_connect('', '')
+# ========== 外部中断
+btn = machine.Pin(27, machine.Pin.IN, machine.Pin.PULL_UP)
+def handle_interrupt(pin):
+    time.sleep_ms(500)
+    if door.info == 'stop':
+        print('自动化关闭')
+        door.approach(0)
+        light.off()
+    else:
+        print('紧急制动')
+        door.stop()
+btn.irq(trigger=machine.Pin.IRQ_FALLING, handler=handle_interrupt)
 
-CDoor = Door()
-CLight = Light()
+# ========== 网络 API
+try:
+    web = Web()
+except:
+    machine.reset()
 
-web = Web()
+def app(req:Req):
+    req.response('gcon_v2')
+web.route('/app', app)
 
+# 运行状态
+def status(req:Req):
+    if 'light' in req.url:
+        req.response(ds.get('light'))
+    if 'door' in req.url:
+        req.response(ds.get('door'))
+    if 'height' in req.url:
+        req.response(str(door.height))
+        
+web.listrout(status, [
+    '/info_light', '/info_door', '/info_height'
+])
 
-def Light_func(req:Req):
-    if req.url == '/Light_on':
-        CLight.on()
-    if req.url == '/Light_off':
-        CLight.off()
-    if req.url == '/Light_status':
-        req.response(str(CLight.status))
-        return
-    req.response('OK')
-    
-def Door_func(req:Req):
-    if req.url == '/Door_open':
-        CDoor.up()
-    if req.url == '/Door_stop':
-        CDoor.stop()
-    if req.url == '/Door_close':
-        CDoor.down()
-    if req.url == '/Door_status':
-        req.response(CDoor.status)
-        return
+# 状态控制
+def control(req:Req):
+    if 'on'  in req.url: light.on()
+    if 'off' in req.url: light.off()
+    if 'up'   in req.url: door.up()
+    if 'down' in req.url: door.down()
+    if 'stop' in req.url: door.stop()
     req.response('OK')
 
-def Auto_func(req:Req):
-    if req.url == '/Auto_open':
-        req.response('start')
-        CDoor.up()
-        CLight.on()
-        time.sleep(25)
-        CDoor.stop()
+web.listrout(control, [
+    '/api/light_on', '/api/light_off', '/api/door_up', '/api/door_down', '/api/door_stop'
+])
+
+# 自动模式
+def approach(req:Req):
+    if 'open' in req.url:
+        req.response('OK')
+        light.on()
+        door.approach(ds.get('Auto_height', 32))
         return
-    if req.url == '/Auto_close':
-        req.response('start')
-        CDoor.down()
-        time.sleep(25)
-        CDoor.stop()
-        CLight.off()
+    if 'close' in req.url:
+        req.response('OK')
+        door.approach(0)
+        light.off()
+        return
 
-
-
-def Dete_func(req):
-    req.response('NONE')
-    
-web.apply({
-    '/Light_on':Light_func,
-    '/Light_off':Light_func,
-    '/Light_status':Light_func,
-    '/Door_open':Door_func,
-    '/Door_stop':Door_func,
-    '/Door_close':Door_func,
-    '/Door_status':Door_func,
-    '/Dete_status':Dete_func,
-    '/Auto_open':Auto_func,
-    '/Auto_close':Auto_func,
-})
+web.listrout(approach, [
+    '/auto_close', '/auto_open'
+])
 
 web.active()

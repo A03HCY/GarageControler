@@ -1,3 +1,5 @@
+import os , json
+
 def init():
     global _ds
     _ds = {}
@@ -19,4 +21,13 @@ def setdefault(key): return _ds.setdefault(key)
 def setlist(keys):
     for i in keys: _ds.setdefault(i)
 
+def setdict(dc):
+    for i in dc: set(i, dc[i])
+
 def update(dic:dict): _ds.update(dic)
+
+def load_json(path:str):
+    with open(path, 'r', encoding='uft-8') as d:
+        data = d.read()
+    data = json.loads(data)
+    setdict(data)

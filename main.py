@@ -1,79 +1,53 @@
-import lib.datasets as ds
-import lib.controls as ctl
-import lib.wifi     as wifi
-import machine , time
-from lib.web    import Web , Req
+# main.py
+import _thread
+import time
+import hardware
+import ble_service
+import config
 
+# 状态心跳间隔（秒）
+HEARTBEAT_INTERVAL = 5
 
-door  = ctl.Door()
-light = ctl.Light()
+def status_heartbeat_thread(ble_ctrl):
+    """
+    后台线程：周期性推送状态（心跳包）
+    确保手机 App 界面状态始终与硬件同步
+    """
+    print("[Thread] 状态同步线程已启动")
+    while True:
+        try:
+            # 只有在蓝牙连接成功时才尝试推送
+            if ble_ctrl._conn_handle is not None:
+                ble_ctrl.push_state()
+            
+            # 这里的睡眠不会阻塞蓝牙指令接收
+            time.sleep(HEARTBEAT_INTERVAL)
+        except Exception as e:
+            print(f"[Thread] 同步线程异常: {e}")
+            time.sleep(2)
 
-wifi.connect()
+def main():
+    print(">>> 卷闸门控制器系统启动中...")
+    
+    # 1. 初始化硬件驱动
+    door = hardware.GarageDoor()
+    light = hardware.GarageLight()
+    
+    # 2. 启动 BLE 控制器 (传入硬件实例)
+    # 控制器内部会处理蓝牙中断逻辑（运行在底层协议栈线程）
+    ble = ble_service.BLEController(door, light)
+    
+    # 3. 启动后台同步线程 (传入 BLE 实例)
+    # 第二个参数必须是元组
+    _thread.start_new_thread(status_heartbeat_thread, (ble,))
+    
+    print(">>> 系统就绪。蓝牙广播名称: {}".format(config.BLE_NAME))
+    
+    # 4. 主线程进入低功耗循环或执行其他监控任务
+    while True:
+        # 这里可以跑一些主循环逻辑，比如喂看门狗(WDT)
+        # 或者监控 ESP32 的内存/温度
+        time.sleep(10)
 
-# ========== 外部中断
-btn = machine.Pin(27, machine.Pin.IN, machine.Pin.PULL_UP)
-def handle_interrupt(pin):
-    time.sleep_ms(500)
-    if door.info == 'stop':
-        print('自动化关闭')
-        door.approach(0)
-        light.off()
-    else:
-        print('紧急制动')
-        door.stop()
-btn.irq(trigger=machine.Pin.IRQ_FALLING, handler=handle_interrupt)
-
-# ========== 网络 API
-try:
-    web = Web()
-except:
-    machine.reset()
-
-def app(req:Req):
-    req.response('gcon_v2')
-web.route('/app', app)
-
-# 运行状态
-def status(req:Req):
-    if 'light' in req.url:
-        req.response(ds.get('light'))
-    if 'door' in req.url:
-        req.response(ds.get('door'))
-    if 'height' in req.url:
-        req.response(str(door.height))
-        
-web.listrout(status, [
-    '/info_light', '/info_door', '/info_height'
-])
-
-# 状态控制
-def control(req:Req):
-    if 'on'  in req.url: light.on()
-    if 'off' in req.url: light.off()
-    if 'up'   in req.url: door.up()
-    if 'down' in req.url: door.down()
-    if 'stop' in req.url: door.stop()
-    req.response('OK')
-
-web.listrout(control, [
-    '/api/light_on', '/api/light_off', '/api/door_up', '/api/door_down', '/api/door_stop'
-])
-
-# 自动模式
-def approach(req:Req):
-    if 'open' in req.url:
-        req.response('OK')
-        light.on()
-        door.approach(ds.get('Auto_height', 32))
-        return
-    if 'close' in req.url:
-        req.response('OK')
-        door.approach(0)
-        light.off()
-        return
-
-web.listrout(approach, [
-    '/auto_close', '/auto_open'
-])
-
-web.active()
+if __name__ == "__main__":
+    main()

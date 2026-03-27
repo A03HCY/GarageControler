@@ -130,10 +130,14 @@ class BLEController:
         self._is_auto_mode = False
         self._push_state()
         print("[Timer] Auto-task execution finished safely.")
+        
+    def push_state(self):
+        """公有方法：允许外部线程触发状态推送"""
+        self._push_state()
 
     def _push_state(self):
-        if not self._conn_handle: return
         state = {"door": self.door.state, "light": self.light.state, "ts": int(time.time())}
+        print(state)
         try:
             payload = json.dumps(state).encode('utf-8')
             self._ble.gatts_write(self._tx_handle, payload)
